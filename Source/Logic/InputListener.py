@@ -91,10 +91,6 @@ class InputListener(QObject):
             return
 
         if self._Mode == "recording":
-            if Key == keyboard.Key.enter:
-                self._Mode = "idle"
-                self.RecordingStopped.emit()
-                return
             Mods = sorted(self._HeldModifiers)
             DisplayName = self._BuildComboName(Mods, Name)
             self.ActionCaptured.emit("Key", Code, DisplayName, Mods)

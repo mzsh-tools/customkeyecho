@@ -16,6 +16,7 @@ from Source.Logic.ConfigMgr import ConfigMgr
 from Source.Logic import FocusWatcher
 from Source.Logic.InputListener import InputListener
 from Source.Logic.KeyPlayer import KeyPlayer
+from Source.UI.RecordDialog import RecordDialog, HotKeyDialog
 
 
 class MainWindow(QMainWindow):
@@ -28,6 +29,7 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(str(IconPath)))
 
         self._Sequences: list[KeySequence] = []
+        self._TargetWindow = ""
         self._HotKeyCode = DefaultHotKeyCode
         self._HotKeyName = DefaultHotKeyName
         self._HotKeyModifiers: list[int] = []
@@ -40,8 +42,8 @@ class MainWindow(QMainWindow):
         self._InitUI()
         self._InitTray()
         self._ConnectSignals()
-        self._LoadConfig()
         self._RefreshWindows()
+        self._LoadConfig()
         self._Listener.Start()
 
     def show(self):
@@ -89,14 +91,15 @@ class MainWindow(QMainWindow):
         self._ComboDelayMinSpin = QSpinBox()
         self._ComboDelayMinSpin.setRange(5, 200)
         self._ComboDelayMinSpin.setValue(DefaultComboDelayMin)
-        self._ComboDelayMinSpin.setSuffix(" ms")
+        self._ComboDelayMinSpin.setKeyboardTracking(False)
         self._ComboDelayMaxSpin = QSpinBox()
         self._ComboDelayMaxSpin.setRange(5, 200)
         self._ComboDelayMaxSpin.setValue(DefaultComboDelayMax)
-        self._ComboDelayMaxSpin.setSuffix(" ms")
+        self._ComboDelayMaxSpin.setKeyboardTracking(False)
         ComboRow.addWidget(self._ComboDelayMinSpin)
         ComboRow.addWidget(QLabel("~"))
         ComboRow.addWidget(self._ComboDelayMaxSpin)
+        ComboRow.addWidget(QLabel("ms"))
         ComboRow.addStretch()
         GeneralLayout.addLayout(ComboRow)
 
@@ -149,11 +152,11 @@ class MainWindow(QMainWindow):
         self._DelayMinSpin = QSpinBox()
         self._DelayMinSpin.setRange(DelayMinLimit, 60000)
         self._DelayMinSpin.setValue(DefaultDelayMin)
-        self._DelayMinSpin.setSuffix(" ms")
+        self._DelayMinSpin.setKeyboardTracking(False)
         self._DelayMaxSpin = QSpinBox()
         self._DelayMaxSpin.setRange(DelayMinLimit, 60000)
         self._DelayMaxSpin.setValue(DefaultDelayMax)
-        self._DelayMaxSpin.setSuffix(" ms")
+        self._DelayMaxSpin.setKeyboardTracking(False)
         DelayLayout.addWidget(QLabel("间隔"))
         DelayLayout.addWidget(self._DelayMinSpin, 1)
         DelayLayout.addWidget(QLabel("~"))
@@ -207,14 +210,13 @@ class MainWindow(QMainWindow):
         self._RecordBtn.clicked.connect(self._ToggleRecording)
         self._HotKeyBtn.clicked.connect(self._StartSettingHotKey)
         self._Listener.ActionCaptured.connect(self._OnActionCaptured)
-        self._Listener.RecordingStopped.connect(self._OnRecordingStopped)
         self._Listener.HotKeyTriggered.connect(self._TogglePlayback)
-        self._Listener.HotKeyCaptured.connect(self._OnHotKeyCaptured)
         self._Player.StatusChanged.connect(self._OnStatusChanged)
         self._DelayMinSpin.valueChanged.connect(self._OnDelayMinChanged)
         self._DelayMaxSpin.valueChanged.connect(self._OnDelayMaxChanged)
         self._SeqList.currentRowChanged.connect(self._OnSeqSelected)
         self._SeqList.model().rowsMoved.connect(self._OnSeqReordered)
+        self._WindowCombo.currentIndexChanged.connect(self._OnTargetWindowChanged)
 
     # ── 窗口列表 ──
 
@@ -306,15 +308,19 @@ class MainWindow(QMainWindow):
 
     def _ToggleRecording(self):
         if self._CurrentSeq() is None:
-            return
-        if self._Listener._Mode == "recording":
-            self._Listener.StopRecording()
-            self._OnRecordingStopped()
-        else:
-            self._RecordBtn.setText("录制中... (按回车结束)")
-            self._Listener.StartRecording()
+            self._AddSequence()
+        self._RecordDlg = RecordDialog(parent=self)
+        self._RecordDlg.RecordingStarted.connect(self._Listener.StartRecording)
+        self._RecordDlg.RecordingStopped.connect(self._Listener.StopRecording)
+        self._RecordDlg.exec()
+        self._RecordDlg = None
+        self._Listener.StopRecording()
+        self._SaveConfig()
 
     def _OnActionCaptured(self, Type, Code, Name, Modifiers):
+        # 只在录制弹窗激活（鼠标在区域内）时才记录
+        if hasattr(self, "_RecordDlg") and self._RecordDlg and not self._RecordDlg.IsActive():
+            return
         Seq = self._CurrentSeq()
         if Seq is None:
             return
@@ -322,10 +328,6 @@ class MainWindow(QMainWindow):
         Seq.Actions.append(Action)
         self._KeyList.addItem(f"{len(Seq.Actions)}. {Name}")
         self._UpdateCurrentSeqDisplay()
-
-    def _OnRecordingStopped(self):
-        self._RecordBtn.setText("录制按键")
-        self._SaveConfig()
 
     def _DeleteSelectedKey(self):
         Seq = self._CurrentSeq()
@@ -350,23 +352,38 @@ class MainWindow(QMainWindow):
     # ── 快捷键设置 ──
 
     def _StartSettingHotKey(self):
-        self._HotKeyBtn.setText("请按下快捷键...")
+        Dlg = HotKeyDialog(parent=self)
+        self._HotKeyDlg = Dlg
         self._Listener.StartSettingHotKey()
+        self._Listener.HotKeyCaptured.connect(self._OnHotKeyCapturedWithDlg)
+        Dlg.exec()
+        self._Listener.HotKeyCaptured.disconnect(self._OnHotKeyCapturedWithDlg)
+        self._HotKeyDlg = None
+        # 如果弹窗关闭时未捕获到快捷键，恢复 idle
+        if self._Listener._Mode == "setting_hotkey":
+            self._Listener._Mode = "idle"
 
-    def _OnHotKeyCaptured(self, Code, Name, Modifiers):
-        self._HotKeyCode = Code
-        self._HotKeyName = Name
-        self._HotKeyModifiers = Modifiers
-        self._HotKeyBtn.setText(Name)
-        self._SaveConfig()
+    def _OnHotKeyCapturedWithDlg(self, Code, Name, Modifiers):
+        if self._HotKeyDlg and self._HotKeyDlg.IsActive():
+            self._HotKeyCode = Code
+            self._HotKeyName = Name
+            self._HotKeyModifiers = Modifiers
+            self._HotKeyBtn.setText(Name)
+            self._SaveConfig()
+            self._HotKeyDlg.OnCaptured()
 
     # ── 回放控制 ──
 
     def _GetTargetWindow(self) -> str:
-        Data = self._WindowCombo.currentData()
+        return self._TargetWindow
+
+    def _OnTargetWindowChanged(self, Idx):
+        Data = self._WindowCombo.itemData(Idx)
         if Data is not None:
-            return Data
-        return self._WindowCombo.currentText()
+            self._TargetWindow = Data
+        else:
+            self._TargetWindow = self._WindowCombo.itemText(Idx)
+        self._SaveConfig()
 
     def _TogglePlayback(self):
         # 快捷键仅在目标窗口焦点时生效
@@ -429,12 +446,21 @@ class MainWindow(QMainWindow):
         Cfg.Set("ComboDelay.Min", self._ComboDelayMinSpin.value())
         Cfg.Set("ComboDelay.Max", self._ComboDelayMaxSpin.value())
         Cfg.Set("AutoHide", self._AutoHideCheck.isChecked())
-        Cfg.Set("TargetWindow", self._WindowCombo.currentText())
+        Cfg.Set("TargetWindow", self._TargetWindow)
         Cfg.Save()
 
     def _LoadConfig(self):
         Cfg = ConfigMgr()
         SeqData = Cfg.Get("Sequences", [])
+        # 兼容旧格式：旧版用 "Actions" 扁平列表 + "Delay.Min/Max"
+        if not SeqData:
+            OldActions = Cfg.Get("Actions", [])
+            if OldActions:
+                SeqData = [{
+                    "Actions": OldActions,
+                    "DelayMin": Cfg.Get("Delay.Min", DefaultDelayMin),
+                    "DelayMax": Cfg.Get("Delay.Max", DefaultDelayMax),
+                }]
         self._Sequences = [KeySequence.FromDict(D) for D in SeqData]
         self._RefreshSeqList()
         self._HotKeyCode = Cfg.Get("HotKey.Code", DefaultHotKeyCode)
@@ -445,11 +471,15 @@ class MainWindow(QMainWindow):
         self._ComboDelayMinSpin.setValue(Cfg.Get("ComboDelay.Min", DefaultComboDelayMin))
         self._ComboDelayMaxSpin.setValue(Cfg.Get("ComboDelay.Max", DefaultComboDelayMax))
         self._AutoHideCheck.setChecked(Cfg.Get("AutoHide", False))
-        Target = Cfg.Get("TargetWindow", "")
-        if Target:
-            Idx = self._WindowCombo.findText(Target)
+        self._TargetWindow = Cfg.Get("TargetWindow", "")
+        if self._TargetWindow:
+            Idx = self._WindowCombo.findText(self._TargetWindow)
             if Idx >= 0:
                 self._WindowCombo.setCurrentIndex(Idx)
+            else:
+                # 窗口当前不存在（如游戏未开），追加到列表显示
+                self._WindowCombo.addItem(self._TargetWindow)
+                self._WindowCombo.setCurrentIndex(self._WindowCombo.count() - 1)
 
     # ── 关闭清理 ──
 

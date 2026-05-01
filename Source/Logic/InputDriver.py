@@ -1,7 +1,6 @@
 import ctypes
 import random
 import time
-from ctypes import wintypes
 
 User32 = ctypes.windll.user32
 
