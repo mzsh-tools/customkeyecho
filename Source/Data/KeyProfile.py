@@ -3,8 +3,6 @@ from dataclasses import dataclass, field
 DelayMinLimit = 10
 DefaultDelayMin = 1000
 DefaultDelayMax = 1500
-DefaultComboDelayMin = 10  # 组合键间隔下限（ms）
-DefaultComboDelayMax = 30  # 组合键间隔上限（ms）
 DefaultHotKeyCode = 117  # F6
 DefaultHotKeyName = "F6"
 

@@ -92,10 +92,10 @@ def _SendKeyEvent(Vk: int, KeyUp: bool):
     User32.SendInput(1, ctypes.byref(Inp), ctypes.sizeof(_INPUT))
 
 
-def SendKey(Vk: int):
-    """发送键盘按键（按下+释放），使用硬件扫描码"""
+def SendKey(Vk: int, PressDelayMin: float = 0.010, PressDelayMax: float = 0.030):
+    """发送键盘按键（按下+释放），按下与弹起之间随机间隔"""
     _SendKeyEvent(Vk, False)
-    time.sleep(0.01)
+    time.sleep(random.uniform(PressDelayMin, PressDelayMax))
     _SendKeyEvent(Vk, True)
 
 
@@ -108,7 +108,7 @@ def SendKeyCombo(Modifiers: list[int], Vk: int, ComboDelayMin: float = 0.010, Co
         _SendKeyEvent(Mod, False)
         _RandDelay()
     _SendKeyEvent(Vk, False)
-    time.sleep(0.01)
+    _RandDelay()
     _SendKeyEvent(Vk, True)
     _RandDelay()
     for Mod in reversed(Modifiers):
@@ -125,8 +125,8 @@ _MouseBtnFlags = {
 }
 
 
-def SendMouseClick(BtnCode: int):
-    """发送鼠标按键（按下+释放）"""
+def SendMouseClick(BtnCode: int, PressDelayMin: float = 0.010, PressDelayMax: float = 0.030):
+    """发送鼠标按键（按下+释放），按下与弹起之间随机间隔"""
     if BtnCode not in _MouseBtnFlags:
         return
     DownFlag, UpFlag, Data = _MouseBtnFlags[BtnCode]
@@ -137,7 +137,7 @@ def SendMouseClick(BtnCode: int):
     Inp.Union.Mi.MouseData = Data
     User32.SendInput(1, ctypes.byref(Inp), ctypes.sizeof(_INPUT))
 
-    time.sleep(0.01)
+    time.sleep(random.uniform(PressDelayMin, PressDelayMax))
 
     Inp.Union.Mi.Flags = UpFlag
     Inp.Union.Mi.MouseData = Data

@@ -4,7 +4,7 @@ from threading import Event, Thread
 from PySide6.QtCore import QObject, Signal
 
 from Source.Logic import InputDriver, FocusWatcher
-from Source.Data.KeyProfile import DefaultComboDelayMin, DefaultComboDelayMax, KeySequence
+from Source.Data.KeyProfile import KeySequence
 
 
 class KeyPlayer(QObject):
@@ -15,17 +15,12 @@ class KeyPlayer(QObject):
         super().__init__()
         self._Sequences: list[KeySequence] = []
         self._TargetWindow = ""
-        self._ComboDelayMin = DefaultComboDelayMin
-        self._ComboDelayMax = DefaultComboDelayMax
         self._StopEvent = Event()
         self._Threads: list[Thread] = []
 
-    def Configure(self, Sequences: list[KeySequence], TargetWindow: str,
-                  ComboDelayMin: int = DefaultComboDelayMin, ComboDelayMax: int = DefaultComboDelayMax):
+    def Configure(self, Sequences: list[KeySequence], TargetWindow: str):
         self._Sequences = [s for s in Sequences if s.Actions]
         self._TargetWindow = TargetWindow
-        self._ComboDelayMin = ComboDelayMin
-        self._ComboDelayMax = ComboDelayMax
 
     def Start(self):
         if not self._Sequences:
@@ -50,8 +45,6 @@ class KeyPlayer(QObject):
 
     def _RunSequence(self, Seq: KeySequence):
         Paused = False
-        ComboMinSec = self._ComboDelayMin / 1000.0
-        ComboMaxSec = self._ComboDelayMax / 1000.0
 
         while not self._StopEvent.is_set():
             for Action in Seq.Actions:
@@ -83,7 +76,7 @@ class KeyPlayer(QObject):
                 # 发送按键
                 if Action.Type == "Key":
                     if Action.Modifiers:
-                        InputDriver.SendKeyCombo(Action.Modifiers, Action.Code, ComboMinSec, ComboMaxSec)
+                        InputDriver.SendKeyCombo(Action.Modifiers, Action.Code)
                     else:
                         InputDriver.SendKey(Action.Code)
                 else:

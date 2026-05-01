@@ -9,8 +9,8 @@ from PySide6.QtWidgets import (
 )
 
 from Source.Data.KeyProfile import (
-    DefaultComboDelayMin, DefaultComboDelayMax, DefaultDelayMax, DefaultDelayMin,
-    DefaultHotKeyCode, DefaultHotKeyName, DelayMinLimit, KeyAction, KeySequence,
+    DefaultDelayMax, DefaultDelayMin, DefaultHotKeyCode,
+    DefaultHotKeyName, DelayMinLimit, KeyAction, KeySequence,
 )
 from Source.Logic.ConfigMgr import ConfigMgr
 from Source.Logic import FocusWatcher
@@ -85,23 +85,6 @@ class MainWindow(QMainWindow):
         HKRow.addStretch()
         GeneralLayout.addLayout(HKRow)
 
-        # 组合键间隔
-        ComboRow = QHBoxLayout()
-        ComboRow.addWidget(QLabel("组合键间隔:"))
-        self._ComboDelayMinSpin = QSpinBox()
-        self._ComboDelayMinSpin.setRange(5, 200)
-        self._ComboDelayMinSpin.setValue(DefaultComboDelayMin)
-        self._ComboDelayMinSpin.setKeyboardTracking(False)
-        self._ComboDelayMaxSpin = QSpinBox()
-        self._ComboDelayMaxSpin.setRange(5, 200)
-        self._ComboDelayMaxSpin.setValue(DefaultComboDelayMax)
-        self._ComboDelayMaxSpin.setKeyboardTracking(False)
-        ComboRow.addWidget(self._ComboDelayMinSpin)
-        ComboRow.addWidget(QLabel("~"))
-        ComboRow.addWidget(self._ComboDelayMaxSpin)
-        ComboRow.addWidget(QLabel("ms"))
-        ComboRow.addStretch()
-        GeneralLayout.addLayout(ComboRow)
 
         # 启动后自动隐藏到托盘
         self._AutoHideCheck = QCheckBox("启动后自动隐藏到托盘")
@@ -394,11 +377,7 @@ class MainWindow(QMainWindow):
         if self._Player.IsRunning():
             self._Player.Stop()
         elif self._Sequences:
-            self._Player.Configure(
-                self._Sequences, Target,
-                ComboDelayMin=self._ComboDelayMinSpin.value(),
-                ComboDelayMax=self._ComboDelayMaxSpin.value(),
-            )
+            self._Player.Configure(self._Sequences, Target)
             self._Player.Start()
 
     def _OnStatusChanged(self, Status):
@@ -443,8 +422,6 @@ class MainWindow(QMainWindow):
         Cfg.Set("HotKey.Code", self._HotKeyCode)
         Cfg.Set("HotKey.Name", self._HotKeyName)
         Cfg.Set("HotKey.Modifiers", self._HotKeyModifiers)
-        Cfg.Set("ComboDelay.Min", self._ComboDelayMinSpin.value())
-        Cfg.Set("ComboDelay.Max", self._ComboDelayMaxSpin.value())
         Cfg.Set("AutoHide", self._AutoHideCheck.isChecked())
         Cfg.Set("TargetWindow", self._TargetWindow)
         Cfg.Save()
@@ -468,8 +445,6 @@ class MainWindow(QMainWindow):
         self._HotKeyModifiers = Cfg.Get("HotKey.Modifiers", [])
         self._HotKeyBtn.setText(self._HotKeyName)
         self._Listener.SetHotKey(self._HotKeyCode, self._HotKeyModifiers)
-        self._ComboDelayMinSpin.setValue(Cfg.Get("ComboDelay.Min", DefaultComboDelayMin))
-        self._ComboDelayMaxSpin.setValue(Cfg.Get("ComboDelay.Max", DefaultComboDelayMax))
         self._AutoHideCheck.setChecked(Cfg.Get("AutoHide", False))
         self._TargetWindow = Cfg.Get("TargetWindow", "")
         if self._TargetWindow:
@@ -485,14 +460,14 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, Event):
         if not self._ReallyQuit:
-            # 关闭按钮 → 隐藏到托盘
             Event.ignore()
             self.hide()
             return
-        # 真正退出
         self._Listener.Stop()
         if self._Player.IsRunning():
             self._Player.Stop()
         self._SaveConfig()
         self._Tray.hide()
         Event.accept()
+        from PySide6.QtWidgets import QApplication
+        QApplication.instance().quit()
