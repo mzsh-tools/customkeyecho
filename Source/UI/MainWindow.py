@@ -41,9 +41,9 @@ class MainWindow(QMainWindow):
 
         self._InitUI()
         self._InitTray()
-        self._ConnectSignals()
         self._RefreshWindows()
         self._LoadConfig()
+        self._ConnectSignals()
         self._Listener.Start()
 
     def show(self):
