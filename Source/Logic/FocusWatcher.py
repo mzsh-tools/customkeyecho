@@ -20,6 +20,17 @@ def IsWindowFocused(Title: str) -> bool:
     return Title.lower() in GetForegroundWindowTitle().lower()
 
 
+def IsWindowExist(Title: str) -> bool:
+    """检查标题匹配的窗口是否存在"""
+    if not Title:
+        return True
+    TitleLower = Title.lower()
+    for W in ListWindows():
+        if TitleLower in W.lower():
+            return True
+    return False
+
+
 def ListWindows() -> list[str]:
     """枚举所有可见窗口标题"""
     Titles = []

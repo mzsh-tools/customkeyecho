@@ -1,4 +1,5 @@
 import ctypes
+import random
 import time
 from ctypes import wintypes
 
@@ -75,12 +76,14 @@ class _INPUT(ctypes.Structure):
     ]
 
 
-def SendKey(Vk: int):
-    """发送键盘按键（按下+释放），使用硬件扫描码"""
+def _SendKeyEvent(Vk: int, KeyUp: bool):
+    """发送单次键盘事件（按下或释放）"""
     Scan = User32.MapVirtualKeyW(Vk, MAPVK_VK_TO_VSC)
     Flags = KEYEVENTF_SCANCODE
     if Vk in _ExtendedVKs:
         Flags |= KEYEVENTF_EXTENDEDKEY
+    if KeyUp:
+        Flags |= KEYEVENTF_KEYUP
 
     Inp = _INPUT()
     Inp.Type = INPUT_KEYBOARD
@@ -89,10 +92,29 @@ def SendKey(Vk: int):
     Inp.Union.Ki.Flags = Flags
     User32.SendInput(1, ctypes.byref(Inp), ctypes.sizeof(_INPUT))
 
-    time.sleep(0.01)
 
-    Inp.Union.Ki.Flags = Flags | KEYEVENTF_KEYUP
-    User32.SendInput(1, ctypes.byref(Inp), ctypes.sizeof(_INPUT))
+def SendKey(Vk: int):
+    """发送键盘按键（按下+释放），使用硬件扫描码"""
+    _SendKeyEvent(Vk, False)
+    time.sleep(0.01)
+    _SendKeyEvent(Vk, True)
+
+
+def SendKeyCombo(Modifiers: list[int], Vk: int, ComboDelayMin: float = 0.010, ComboDelayMax: float = 0.030):
+    """发送组合键：依次按下修饰键 → 按主键 → 依次释放修饰键，间隔随机"""
+    def _RandDelay():
+        time.sleep(random.uniform(ComboDelayMin, ComboDelayMax))
+
+    for Mod in Modifiers:
+        _SendKeyEvent(Mod, False)
+        _RandDelay()
+    _SendKeyEvent(Vk, False)
+    time.sleep(0.01)
+    _SendKeyEvent(Vk, True)
+    _RandDelay()
+    for Mod in reversed(Modifiers):
+        _SendKeyEvent(Mod, True)
+        _RandDelay()
 
 
 _MouseBtnFlags = {

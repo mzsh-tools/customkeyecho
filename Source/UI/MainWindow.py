@@ -1,12 +1,16 @@
+from pathlib import Path
+
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
-    QGroupBox, QHBoxLayout, QLabel, QMainWindow, QComboBox,
-    QListWidget, QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QAbstractItemView, QCheckBox, QGroupBox, QHBoxLayout, QLabel, QListWidgetItem,
+    QMainWindow, QComboBox, QListWidget, QMenu, QPushButton, QSpinBox,
+    QSystemTrayIcon, QVBoxLayout, QWidget,
 )
 
 from Source.Data.KeyProfile import (
-    DefaultDelayMax, DefaultDelayMin, DefaultHotKeyCode,
-    DefaultHotKeyName, DelayMinLimit, KeyAction,
+    DefaultComboDelayMin, DefaultComboDelayMax, DefaultDelayMax, DefaultDelayMin,
+    DefaultHotKeyCode, DefaultHotKeyName, DelayMinLimit, KeyAction, KeySequence,
 )
 from Source.Logic.ConfigMgr import ConfigMgr
 from Source.Logic import FocusWatcher
@@ -18,20 +22,33 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("CustomKeyEcho - 自定义按键回声")
-        self.setMinimumSize(420, 500)
+        self.setMinimumSize(500, 620)
+        IconPath = Path(__file__).resolve().parent.parent.parent / "Assets" / "icon.png"
+        if IconPath.exists():
+            self.setWindowIcon(QIcon(str(IconPath)))
 
-        self._Actions: list[KeyAction] = []
+        self._Sequences: list[KeySequence] = []
         self._HotKeyCode = DefaultHotKeyCode
         self._HotKeyName = DefaultHotKeyName
+        self._HotKeyModifiers: list[int] = []
 
         self._Listener = InputListener()
         self._Player = KeyPlayer()
 
+        self._ReallyQuit = False
+
         self._InitUI()
+        self._InitTray()
         self._ConnectSignals()
         self._LoadConfig()
         self._RefreshWindows()
         self._Listener.Start()
+
+    def show(self):
+        if self._AutoHideCheck.isChecked():
+            self.hide()
+        else:
+            super().show()
 
     # ── UI 构建 ──
 
@@ -41,40 +58,93 @@ class MainWindow(QMainWindow):
         Root = QVBoxLayout(Central)
         Root.setSpacing(10)
 
+        # 通用设置（最上方）
+        GeneralGroup = QGroupBox("通用设置")
+        GeneralLayout = QVBoxLayout()
+
         # 目标窗口
-        WinGroup = QGroupBox("目标窗口")
-        WinLayout = QHBoxLayout()
+        WinRow = QHBoxLayout()
+        WinRow.addWidget(QLabel("目标窗口:"))
         self._WindowCombo = QComboBox()
-        self._WindowCombo.setEditable(True)
-        RefreshBtn = QPushButton("刷新列表")
-        RefreshBtn.setFixedWidth(80)
+        self._WindowCombo.setEditable(False)
+        RefreshBtn = QPushButton("刷新")
+        RefreshBtn.setFixedWidth(60)
         RefreshBtn.clicked.connect(self._RefreshWindows)
-        WinLayout.addWidget(self._WindowCombo, 1)
-        WinLayout.addWidget(RefreshBtn)
-        WinGroup.setLayout(WinLayout)
-        Root.addWidget(WinGroup)
+        WinRow.addWidget(self._WindowCombo, 1)
+        WinRow.addWidget(RefreshBtn)
+        GeneralLayout.addLayout(WinRow)
 
-        # 按键序列
-        KeyGroup = QGroupBox("按键序列")
-        KeyLayout = QVBoxLayout()
+        # 快捷键
+        HKRow = QHBoxLayout()
+        HKRow.addWidget(QLabel("快捷键:"))
+        self._HotKeyBtn = QPushButton(self._HotKeyName)
+        self._HotKeyBtn.setFixedWidth(150)
+        HKRow.addWidget(self._HotKeyBtn)
+        HKRow.addStretch()
+        GeneralLayout.addLayout(HKRow)
+
+        # 组合键间隔
+        ComboRow = QHBoxLayout()
+        ComboRow.addWidget(QLabel("组合键间隔:"))
+        self._ComboDelayMinSpin = QSpinBox()
+        self._ComboDelayMinSpin.setRange(5, 200)
+        self._ComboDelayMinSpin.setValue(DefaultComboDelayMin)
+        self._ComboDelayMinSpin.setSuffix(" ms")
+        self._ComboDelayMaxSpin = QSpinBox()
+        self._ComboDelayMaxSpin.setRange(5, 200)
+        self._ComboDelayMaxSpin.setValue(DefaultComboDelayMax)
+        self._ComboDelayMaxSpin.setSuffix(" ms")
+        ComboRow.addWidget(self._ComboDelayMinSpin)
+        ComboRow.addWidget(QLabel("~"))
+        ComboRow.addWidget(self._ComboDelayMaxSpin)
+        ComboRow.addStretch()
+        GeneralLayout.addLayout(ComboRow)
+
+        # 启动后自动隐藏到托盘
+        self._AutoHideCheck = QCheckBox("启动后自动隐藏到托盘")
+        GeneralLayout.addWidget(self._AutoHideCheck)
+
+        GeneralGroup.setLayout(GeneralLayout)
+        Root.addWidget(GeneralGroup)
+
+        # 序列列表
+        SeqGroup = QGroupBox("按键序列列表（各行独立并行执行）")
+        SeqLayout = QVBoxLayout()
+        self._SeqList = QListWidget()
+        self._SeqList.setMinimumHeight(120)
+        self._SeqList.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self._SeqList.setDefaultDropAction(Qt.DropAction.MoveAction)
+        SeqLayout.addWidget(self._SeqList)
+        SeqBtnRow = QHBoxLayout()
+        AddSeqBtn = QPushButton("添加序列")
+        DelSeqBtn = QPushButton("删除选中")
+        AddSeqBtn.clicked.connect(self._AddSequence)
+        DelSeqBtn.clicked.connect(self._DeleteSequence)
+        SeqBtnRow.addWidget(AddSeqBtn)
+        SeqBtnRow.addWidget(DelSeqBtn)
+        SeqBtnRow.addStretch()
+        SeqLayout.addLayout(SeqBtnRow)
+        SeqGroup.setLayout(SeqLayout)
+        Root.addWidget(SeqGroup)
+
+        # 序列详情编辑区
+        DetailGroup = QGroupBox("序列详情（选中上方序列后编辑）")
+        DetailLayout = QVBoxLayout()
+
         self._KeyList = QListWidget()
-        self._KeyList.setMinimumHeight(150)
-        KeyLayout.addWidget(self._KeyList)
-        BtnRow = QHBoxLayout()
+        self._KeyList.setMinimumHeight(100)
+        DetailLayout.addWidget(self._KeyList)
+        KeyBtnRow = QHBoxLayout()
         self._RecordBtn = QPushButton("录制按键")
-        DeleteBtn = QPushButton("删除选中")
-        ClearBtn = QPushButton("清空")
-        DeleteBtn.clicked.connect(self._DeleteSelected)
-        ClearBtn.clicked.connect(self._ClearActions)
-        BtnRow.addWidget(self._RecordBtn)
-        BtnRow.addWidget(DeleteBtn)
-        BtnRow.addWidget(ClearBtn)
-        KeyLayout.addLayout(BtnRow)
-        KeyGroup.setLayout(KeyLayout)
-        Root.addWidget(KeyGroup)
+        DeleteKeyBtn = QPushButton("删除选中按键")
+        ClearKeyBtn = QPushButton("清空按键")
+        DeleteKeyBtn.clicked.connect(self._DeleteSelectedKey)
+        ClearKeyBtn.clicked.connect(self._ClearKeys)
+        KeyBtnRow.addWidget(self._RecordBtn)
+        KeyBtnRow.addWidget(DeleteKeyBtn)
+        KeyBtnRow.addWidget(ClearKeyBtn)
+        DetailLayout.addLayout(KeyBtnRow)
 
-        # 按键间隔
-        DelayGroup = QGroupBox("按键间隔（每次随机取值，防检测）")
         DelayLayout = QHBoxLayout()
         self._DelayMinSpin = QSpinBox()
         self._DelayMinSpin.setRange(DelayMinLimit, 60000)
@@ -84,29 +154,52 @@ class MainWindow(QMainWindow):
         self._DelayMaxSpin.setRange(DelayMinLimit, 60000)
         self._DelayMaxSpin.setValue(DefaultDelayMax)
         self._DelayMaxSpin.setSuffix(" ms")
-        DelayLayout.addWidget(QLabel("最小"))
+        DelayLayout.addWidget(QLabel("间隔"))
         DelayLayout.addWidget(self._DelayMinSpin, 1)
         DelayLayout.addWidget(QLabel("~"))
         DelayLayout.addWidget(self._DelayMaxSpin, 1)
-        DelayLayout.addWidget(QLabel("最大"))
-        DelayGroup.setLayout(DelayLayout)
-        Root.addWidget(DelayGroup)
+        DelayLayout.addWidget(QLabel("ms"))
+        DetailLayout.addLayout(DelayLayout)
 
-        # 控制
-        CtrlGroup = QGroupBox("控制")
-        CtrlLayout = QVBoxLayout()
-        HKRow = QHBoxLayout()
-        HKRow.addWidget(QLabel("快捷键:"))
-        self._HotKeyBtn = QPushButton(self._HotKeyName)
-        self._HotKeyBtn.setFixedWidth(120)
-        HKRow.addWidget(self._HotKeyBtn)
-        HKRow.addStretch()
-        CtrlLayout.addLayout(HKRow)
+        DetailGroup.setLayout(DetailLayout)
+        Root.addWidget(DetailGroup)
+
+        # 状态
         self._StatusLabel = QLabel("状态: 已停止")
         self._StatusLabel.setStyleSheet("font-size: 14px; font-weight: bold;")
-        CtrlLayout.addWidget(self._StatusLabel)
-        CtrlGroup.setLayout(CtrlLayout)
-        Root.addWidget(CtrlGroup)
+        Root.addWidget(self._StatusLabel)
+
+    # ── 系统托盘 ──
+
+    def _InitTray(self):
+        self._Tray = QSystemTrayIcon(self)
+        self._Tray.setIcon(self.windowIcon() or QIcon())
+        self._Tray.setToolTip("CustomKeyEcho")
+
+        TrayMenu = QMenu()
+        ShowAction = QAction("显示窗口", self)
+        ShowAction.triggered.connect(self._ShowFromTray)
+        QuitAction = QAction("退出", self)
+        QuitAction.triggered.connect(self._QuitApp)
+        TrayMenu.addAction(ShowAction)
+        TrayMenu.addSeparator()
+        TrayMenu.addAction(QuitAction)
+
+        self._Tray.setContextMenu(TrayMenu)
+        self._Tray.activated.connect(self._OnTrayActivated)
+        self._Tray.show()
+
+    def _OnTrayActivated(self, Reason):
+        if Reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self._ShowFromTray()
+
+    def _ShowFromTray(self):
+        self.showNormal()
+        self.activateWindow()
+
+    def _QuitApp(self):
+        self._ReallyQuit = True
+        self.close()
 
     # ── 信号连接 ──
 
@@ -120,23 +213,100 @@ class MainWindow(QMainWindow):
         self._Player.StatusChanged.connect(self._OnStatusChanged)
         self._DelayMinSpin.valueChanged.connect(self._OnDelayMinChanged)
         self._DelayMaxSpin.valueChanged.connect(self._OnDelayMaxChanged)
+        self._SeqList.currentRowChanged.connect(self._OnSeqSelected)
+        self._SeqList.model().rowsMoved.connect(self._OnSeqReordered)
 
     # ── 窗口列表 ──
 
     def _RefreshWindows(self):
+        CurIdx = self._WindowCombo.currentIndex()
         CurText = self._WindowCombo.currentText()
         self._WindowCombo.clear()
+        self._WindowCombo.addItem("(不检测焦点)", "")
         self._WindowCombo.addItems(FocusWatcher.ListWindows())
-        if CurText:
+        if CurText and CurIdx > 0:
             Idx = self._WindowCombo.findText(CurText)
             if Idx >= 0:
                 self._WindowCombo.setCurrentIndex(Idx)
-            else:
-                self._WindowCombo.setEditText(CurText)
+
+    # ── 序列列表管理 ──
+
+    def _AddSequence(self):
+        Seq = KeySequence()
+        self._Sequences.append(Seq)
+        self._RefreshSeqList()
+        self._SeqList.setCurrentRow(len(self._Sequences) - 1)
+        self._SaveConfig()
+
+    def _DeleteSequence(self):
+        Idx = self._SeqList.currentRow()
+        if Idx < 0:
+            return
+        self._Sequences.pop(Idx)
+        self._RefreshSeqList()
+        self._RefreshDetail()
+        self._SaveConfig()
+
+    def _OnSeqSelected(self, Idx):
+        self._RefreshDetail()
+
+    def _OnSeqReordered(self):
+        # 按 item 存储的原始索引重建顺序
+        OldSeqs = list(self._Sequences)
+        self._Sequences = [
+            OldSeqs[self._SeqList.item(I).data(Qt.ItemDataRole.UserRole)]
+            for I in range(self._SeqList.count())
+            if self._SeqList.item(I).data(Qt.ItemDataRole.UserRole) < len(OldSeqs)
+        ]
+        self._RefreshSeqList()
+        self._SaveConfig()
+
+    def _RefreshSeqList(self):
+        self._SeqList.blockSignals(True)
+        Cur = self._SeqList.currentRow()
+        self._SeqList.clear()
+        for I, Seq in enumerate(self._Sequences):
+            Item = QListWidgetItem(Seq.DisplayName())
+            Item.setData(Qt.ItemDataRole.UserRole, I)
+            self._SeqList.addItem(Item)
+        if 0 <= Cur < len(self._Sequences):
+            self._SeqList.setCurrentRow(Cur)
+        self._SeqList.blockSignals(False)
+
+    def _UpdateCurrentSeqDisplay(self):
+        Idx = self._SeqList.currentRow()
+        if 0 <= Idx < len(self._Sequences):
+            self._SeqList.item(Idx).setText(self._Sequences[Idx].DisplayName())
+
+    # ── 序列详情编辑 ──
+
+    def _CurrentSeq(self) -> KeySequence | None:
+        Idx = self._SeqList.currentRow()
+        if 0 <= Idx < len(self._Sequences):
+            return self._Sequences[Idx]
+        return None
+
+    def _RefreshDetail(self):
+        Seq = self._CurrentSeq()
+        self._KeyList.clear()
+        if Seq is None:
+            self._DelayMinSpin.setValue(DefaultDelayMin)
+            self._DelayMaxSpin.setValue(DefaultDelayMax)
+            return
+        for I, Action in enumerate(Seq.Actions, 1):
+            self._KeyList.addItem(f"{I}. {Action.Name}")
+        self._DelayMinSpin.blockSignals(True)
+        self._DelayMaxSpin.blockSignals(True)
+        self._DelayMinSpin.setValue(Seq.DelayMin)
+        self._DelayMaxSpin.setValue(Seq.DelayMax)
+        self._DelayMinSpin.blockSignals(False)
+        self._DelayMaxSpin.blockSignals(False)
 
     # ── 按键录制 ──
 
     def _ToggleRecording(self):
+        if self._CurrentSeq() is None:
+            return
         if self._Listener._Mode == "recording":
             self._Listener.StopRecording()
             self._OnRecordingStopped()
@@ -144,29 +314,38 @@ class MainWindow(QMainWindow):
             self._RecordBtn.setText("录制中... (按回车结束)")
             self._Listener.StartRecording()
 
-    def _OnActionCaptured(self, Type, Code, Name):
-        Action = KeyAction(Type=Type, Code=Code, Name=Name)
-        self._Actions.append(Action)
-        self._KeyList.addItem(f"{len(self._Actions)}. {Name}")
+    def _OnActionCaptured(self, Type, Code, Name, Modifiers):
+        Seq = self._CurrentSeq()
+        if Seq is None:
+            return
+        Action = KeyAction(Type=Type, Code=Code, Name=Name, Modifiers=Modifiers)
+        Seq.Actions.append(Action)
+        self._KeyList.addItem(f"{len(Seq.Actions)}. {Name}")
+        self._UpdateCurrentSeqDisplay()
 
     def _OnRecordingStopped(self):
         self._RecordBtn.setText("录制按键")
         self._SaveConfig()
 
-    def _DeleteSelected(self):
+    def _DeleteSelectedKey(self):
+        Seq = self._CurrentSeq()
+        if Seq is None:
+            return
         Idx = self._KeyList.currentRow()
         if Idx >= 0:
-            self._Actions.pop(Idx)
-            self._RefreshKeyList()
+            Seq.Actions.pop(Idx)
+            self._RefreshDetail()
+            self._UpdateCurrentSeqDisplay()
+            self._SaveConfig()
 
-    def _ClearActions(self):
-        self._Actions.clear()
+    def _ClearKeys(self):
+        Seq = self._CurrentSeq()
+        if Seq is None:
+            return
+        Seq.Actions.clear()
         self._KeyList.clear()
-
-    def _RefreshKeyList(self):
-        self._KeyList.clear()
-        for I, Action in enumerate(self._Actions, 1):
-            self._KeyList.addItem(f"{I}. {Action.Name}")
+        self._UpdateCurrentSeqDisplay()
+        self._SaveConfig()
 
     # ── 快捷键设置 ──
 
@@ -174,25 +353,36 @@ class MainWindow(QMainWindow):
         self._HotKeyBtn.setText("请按下快捷键...")
         self._Listener.StartSettingHotKey()
 
-    def _OnHotKeyCaptured(self, Code, Name):
+    def _OnHotKeyCaptured(self, Code, Name, Modifiers):
         self._HotKeyCode = Code
         self._HotKeyName = Name
+        self._HotKeyModifiers = Modifiers
         self._HotKeyBtn.setText(Name)
         self._SaveConfig()
 
     # ── 回放控制 ──
 
+    def _GetTargetWindow(self) -> str:
+        Data = self._WindowCombo.currentData()
+        if Data is not None:
+            return Data
+        return self._WindowCombo.currentText()
+
     def _TogglePlayback(self):
-        if self._Player.isRunning():
+        # 快捷键仅在目标窗口焦点时生效
+        Target = self._GetTargetWindow()
+        if Target and not FocusWatcher.IsWindowFocused(Target):
+            return
+
+        if self._Player.IsRunning():
             self._Player.Stop()
-        elif self._Actions:
+        elif self._Sequences:
             self._Player.Configure(
-                self._Actions,
-                self._DelayMinSpin.value(),
-                self._DelayMaxSpin.value(),
-                self._WindowCombo.currentText(),
+                self._Sequences, Target,
+                ComboDelayMin=self._ComboDelayMinSpin.value(),
+                ComboDelayMax=self._ComboDelayMaxSpin.value(),
             )
-            self._Player.start()
+            self._Player.Start()
 
     def _OnStatusChanged(self, Status):
         Map = {
@@ -206,45 +396,73 @@ class MainWindow(QMainWindow):
 
     def _OnDelayMinChanged(self, Value):
         if self._DelayMaxSpin.value() < Value:
+            self._DelayMaxSpin.blockSignals(True)
             self._DelayMaxSpin.setValue(Value)
+            self._DelayMaxSpin.blockSignals(False)
+        Seq = self._CurrentSeq()
+        if Seq:
+            Seq.DelayMin = Value
+            Seq.DelayMax = self._DelayMaxSpin.value()
+            self._UpdateCurrentSeqDisplay()
+            self._SaveConfig()
 
     def _OnDelayMaxChanged(self, Value):
         if self._DelayMinSpin.value() > Value:
+            self._DelayMinSpin.blockSignals(True)
             self._DelayMinSpin.setValue(Value)
+            self._DelayMinSpin.blockSignals(False)
+        Seq = self._CurrentSeq()
+        if Seq:
+            Seq.DelayMax = Value
+            Seq.DelayMin = self._DelayMinSpin.value()
+            self._UpdateCurrentSeqDisplay()
+            self._SaveConfig()
 
     # ── 配置持久化 ──
 
     def _SaveConfig(self):
         Cfg = ConfigMgr()
-        Cfg.Set("Actions", [{"Type": A.Type, "Code": A.Code, "Name": A.Name} for A in self._Actions])
-        Cfg.Set("Delay.Min", self._DelayMinSpin.value())
-        Cfg.Set("Delay.Max", self._DelayMaxSpin.value())
+        Cfg.Set("Sequences", [S.ToDict() for S in self._Sequences])
         Cfg.Set("HotKey.Code", self._HotKeyCode)
         Cfg.Set("HotKey.Name", self._HotKeyName)
+        Cfg.Set("HotKey.Modifiers", self._HotKeyModifiers)
+        Cfg.Set("ComboDelay.Min", self._ComboDelayMinSpin.value())
+        Cfg.Set("ComboDelay.Max", self._ComboDelayMaxSpin.value())
+        Cfg.Set("AutoHide", self._AutoHideCheck.isChecked())
         Cfg.Set("TargetWindow", self._WindowCombo.currentText())
         Cfg.Save()
 
     def _LoadConfig(self):
         Cfg = ConfigMgr()
-        Actions = Cfg.Get("Actions", [])
-        self._Actions = [KeyAction(**A) for A in Actions]
-        self._RefreshKeyList()
-        self._DelayMinSpin.setValue(Cfg.Get("Delay.Min", DefaultDelayMin))
-        self._DelayMaxSpin.setValue(Cfg.Get("Delay.Max", DefaultDelayMax))
+        SeqData = Cfg.Get("Sequences", [])
+        self._Sequences = [KeySequence.FromDict(D) for D in SeqData]
+        self._RefreshSeqList()
         self._HotKeyCode = Cfg.Get("HotKey.Code", DefaultHotKeyCode)
         self._HotKeyName = Cfg.Get("HotKey.Name", DefaultHotKeyName)
+        self._HotKeyModifiers = Cfg.Get("HotKey.Modifiers", [])
         self._HotKeyBtn.setText(self._HotKeyName)
-        self._Listener.SetHotKeyCode(self._HotKeyCode)
+        self._Listener.SetHotKey(self._HotKeyCode, self._HotKeyModifiers)
+        self._ComboDelayMinSpin.setValue(Cfg.Get("ComboDelay.Min", DefaultComboDelayMin))
+        self._ComboDelayMaxSpin.setValue(Cfg.Get("ComboDelay.Max", DefaultComboDelayMax))
+        self._AutoHideCheck.setChecked(Cfg.Get("AutoHide", False))
         Target = Cfg.Get("TargetWindow", "")
         if Target:
-            self._WindowCombo.setEditText(Target)
+            Idx = self._WindowCombo.findText(Target)
+            if Idx >= 0:
+                self._WindowCombo.setCurrentIndex(Idx)
 
     # ── 关闭清理 ──
 
     def closeEvent(self, Event):
+        if not self._ReallyQuit:
+            # 关闭按钮 → 隐藏到托盘
+            Event.ignore()
+            self.hide()
+            return
+        # 真正退出
         self._Listener.Stop()
-        if self._Player.isRunning():
+        if self._Player.IsRunning():
             self._Player.Stop()
-            self._Player.wait(2000)
         self._SaveConfig()
+        self._Tray.hide()
         Event.accept()
