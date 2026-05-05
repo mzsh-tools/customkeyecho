@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-DelayMinLimit = 10
+DelayMinLimit = 0
 DefaultDelayMin = 1000
 DefaultDelayMax = 1500
 DefaultHotKeyCode = 117  # F6
@@ -51,4 +51,5 @@ class KeySequence:
         Keys = ", ".join(A.Name for A in self.Actions[:4])
         if len(self.Actions) > 4:
             Keys += f" ... (+{len(self.Actions) - 4})"
-        return f"[{Keys}]  {self.DelayMin}~{self.DelayMax}ms"
+        Delay = "长按" if self.DelayMin == 0 and self.DelayMax == 0 else f"{self.DelayMin}~{self.DelayMax}ms"
+        return f"[{Keys}]  {Delay}"

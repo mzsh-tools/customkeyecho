@@ -92,6 +92,16 @@ def _SendKeyEvent(Vk: int, KeyUp: bool):
     User32.SendInput(1, ctypes.byref(Inp), ctypes.sizeof(_INPUT))
 
 
+def KeyDown(Vk: int):
+    """按下键盘按键（不释放）"""
+    _SendKeyEvent(Vk, False)
+
+
+def KeyUp(Vk: int):
+    """释放键盘按键"""
+    _SendKeyEvent(Vk, True)
+
+
 def SendKey(Vk: int, PressDelayMin: float = 0.010, PressDelayMax: float = 0.030):
     """发送键盘按键（按下+释放），按下与弹起之间随机间隔"""
     _SendKeyEvent(Vk, False)
@@ -123,6 +133,30 @@ _MouseBtnFlags = {
     4: (MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, XBUTTON1),
     5: (MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, XBUTTON2),
 }
+
+
+def MouseDown(BtnCode: int):
+    """按下鼠标按键（不释放）"""
+    if BtnCode not in _MouseBtnFlags:
+        return
+    DownFlag, _, Data = _MouseBtnFlags[BtnCode]
+    Inp = _INPUT()
+    Inp.Type = INPUT_MOUSE
+    Inp.Union.Mi.Flags = DownFlag
+    Inp.Union.Mi.MouseData = Data
+    User32.SendInput(1, ctypes.byref(Inp), ctypes.sizeof(_INPUT))
+
+
+def MouseUp(BtnCode: int):
+    """释放鼠标按键"""
+    if BtnCode not in _MouseBtnFlags:
+        return
+    _, UpFlag, Data = _MouseBtnFlags[BtnCode]
+    Inp = _INPUT()
+    Inp.Type = INPUT_MOUSE
+    Inp.Union.Mi.Flags = UpFlag
+    Inp.Union.Mi.MouseData = Data
+    User32.SendInput(1, ctypes.byref(Inp), ctypes.sizeof(_INPUT))
 
 
 def SendMouseClick(BtnCode: int, PressDelayMin: float = 0.010, PressDelayMax: float = 0.030):

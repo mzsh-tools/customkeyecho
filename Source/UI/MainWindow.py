@@ -275,6 +275,8 @@ class MainWindow(QMainWindow):
         Seq = self._CurrentSeq()
         self._KeyList.clear()
         if Seq is None:
+            self._DelayMinSpin.setMaximum(60000)
+            self._DelayMaxSpin.setMinimum(DelayMinLimit)
             self._DelayMinSpin.setValue(DefaultDelayMin)
             self._DelayMaxSpin.setValue(DefaultDelayMax)
             return
@@ -282,6 +284,8 @@ class MainWindow(QMainWindow):
             self._KeyList.addItem(f"{I}. {Action.Name}")
         self._DelayMinSpin.blockSignals(True)
         self._DelayMaxSpin.blockSignals(True)
+        self._DelayMinSpin.setMaximum(Seq.DelayMax)
+        self._DelayMaxSpin.setMinimum(Seq.DelayMin)
         self._DelayMinSpin.setValue(Seq.DelayMin)
         self._DelayMaxSpin.setValue(Seq.DelayMax)
         self._DelayMinSpin.blockSignals(False)
@@ -391,10 +395,7 @@ class MainWindow(QMainWindow):
     # ── 延迟校验 ──
 
     def _OnDelayMinChanged(self, Value):
-        if self._DelayMaxSpin.value() < Value:
-            self._DelayMaxSpin.blockSignals(True)
-            self._DelayMaxSpin.setValue(Value)
-            self._DelayMaxSpin.blockSignals(False)
+        self._DelayMaxSpin.setMinimum(Value)
         Seq = self._CurrentSeq()
         if Seq:
             Seq.DelayMin = Value
@@ -403,10 +404,7 @@ class MainWindow(QMainWindow):
             self._SaveConfig()
 
     def _OnDelayMaxChanged(self, Value):
-        if self._DelayMinSpin.value() > Value:
-            self._DelayMinSpin.blockSignals(True)
-            self._DelayMinSpin.setValue(Value)
-            self._DelayMinSpin.blockSignals(False)
+        self._DelayMinSpin.setMaximum(Value)
         Seq = self._CurrentSeq()
         if Seq:
             Seq.DelayMax = Value

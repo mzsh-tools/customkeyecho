@@ -1,4 +1,5 @@
 import random
+import time
 from threading import Event, Thread
 
 from PySide6.QtCore import QObject, Signal
@@ -43,37 +44,83 @@ class KeyPlayer(QObject):
     def IsRunning(self) -> bool:
         return any(T.is_alive() for T in self._Threads)
 
-    def _RunSequence(self, Seq: KeySequence):
-        Paused = False
+    def _WaitFocus(self) -> bool:
+        """等待目标窗口获得焦点，返回 False 表示窗口关闭或收到停止信号"""
+        if not self._TargetWindow or FocusWatcher.IsWindowFocused(self._TargetWindow):
+            return True
+        if not FocusWatcher.IsWindowExist(self._TargetWindow):
+            self._StopEvent.set()
+            self.StatusChanged.emit("stopped")
+            return False
+        self.StatusChanged.emit("paused")
+        while not self._StopEvent.is_set() and not FocusWatcher.IsWindowFocused(self._TargetWindow):
+            if not FocusWatcher.IsWindowExist(self._TargetWindow):
+                self._StopEvent.set()
+                self.StatusChanged.emit("stopped")
+                return False
+            self._StopEvent.wait(0.2)
+        if self._StopEvent.is_set():
+            return False
+        self.StatusChanged.emit("playing")
+        return True
 
+    def _PressAction(self, Action):
+        """按下 Action 的所有键（不释放）"""
+        if Action.Type == "Key":
+            for Mod in Action.Modifiers:
+                InputDriver.KeyDown(Mod)
+                time.sleep(random.uniform(0.010, 0.030))
+            InputDriver.KeyDown(Action.Code)
+        else:
+            InputDriver.MouseDown(Action.Code)
+
+    def _ReleaseAction(self, Action):
+        """释放 Action 的所有键（反序）"""
+        if Action.Type == "Key":
+            InputDriver.KeyUp(Action.Code)
+            for Mod in reversed(Action.Modifiers):
+                time.sleep(random.uniform(0.010, 0.030))
+                InputDriver.KeyUp(Mod)
+        else:
+            InputDriver.MouseUp(Action.Code)
+
+    def _RunSequence(self, Seq: KeySequence):
+        if Seq.DelayMin == 0 and Seq.DelayMax == 0:
+            self._RunHoldSequence(Seq)
+        else:
+            self._RunLoopSequence(Seq)
+
+    def _RunHoldSequence(self, Seq: KeySequence):
+        """长按模式：按住第一个 Action 直到停止或失焦"""
+        if not Seq.Actions:
+            return
+        Action = Seq.Actions[0]
+        Holding = False
+        try:
+            while not self._StopEvent.is_set():
+                if not self._WaitFocus():
+                    return
+                if not Holding:
+                    self._PressAction(Action)
+                    Holding = True
+                self._StopEvent.wait(0.1)
+                # 失焦时释放，下轮循环重新等待焦点后按下
+                if self._TargetWindow and not FocusWatcher.IsWindowFocused(self._TargetWindow):
+                    self._ReleaseAction(Action)
+                    Holding = False
+        finally:
+            if Holding:
+                self._ReleaseAction(Action)
+
+    def _RunLoopSequence(self, Seq: KeySequence):
+        """循环模式：依次发送按键序列并循环"""
         while not self._StopEvent.is_set():
             for Action in Seq.Actions:
                 if self._StopEvent.is_set():
                     return
+                if not self._WaitFocus():
+                    return
 
-                # 焦点检测
-                if self._TargetWindow and not FocusWatcher.IsWindowFocused(self._TargetWindow):
-                    # 目标窗口已关闭 → 自动停止所有序列
-                    if not FocusWatcher.IsWindowExist(self._TargetWindow):
-                        self._StopEvent.set()
-                        self.StatusChanged.emit("stopped")
-                        return
-                    if not Paused:
-                        self.StatusChanged.emit("paused")
-                        Paused = True
-                    while not self._StopEvent.is_set() and not FocusWatcher.IsWindowFocused(self._TargetWindow):
-                        if not FocusWatcher.IsWindowExist(self._TargetWindow):
-                            self._StopEvent.set()
-                            self.StatusChanged.emit("stopped")
-                            return
-                        self._StopEvent.wait(0.2)
-                    if self._StopEvent.is_set():
-                        return
-                    if Paused:
-                        self.StatusChanged.emit("playing")
-                        Paused = False
-
-                # 发送按键
                 if Action.Type == "Key":
                     if Action.Modifiers:
                         InputDriver.SendKeyCombo(Action.Modifiers, Action.Code)
@@ -82,6 +129,5 @@ class KeyPlayer(QObject):
                 else:
                     InputDriver.SendMouseClick(Action.Code)
 
-                # 随机延迟
                 Delay = random.randint(Seq.DelayMin, Seq.DelayMax) / 1000.0
                 self._StopEvent.wait(Delay)

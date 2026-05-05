@@ -1,29 +1,6 @@
 # CustomKeyEcho 使用说明
 
-## 环境搭建
-
-```bash
-# 创建 Conda 环境
-conda create -n CustomKeyEcho python=3.12 --yes
-
-# 安装依赖
-conda run -n CustomKeyEcho pip install PySide6 pynput platformdirs
-```
-
-> 如遇 conda SSL 问题，使用清华镜像源：
-> ```bash
-> conda create -n CustomKeyEcho python=3.12 --yes --override-channels -c https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main
-> ```
-
-## 启动
-
-```bash
-eval "$(conda shell.bash hook 2>/dev/null)" && conda activate CustomKeyEcho && python Main.py
-```
-
-## 使用步骤
-
-### 1. 通用设置
+## 1. 通用设置
 
 位于界面顶部：
 
@@ -31,26 +8,28 @@ eval "$(conda shell.bash hook 2>/dev/null)" && conda activate CustomKeyEcho && p
 - **快捷键**：点击按钮弹出设置窗口，鼠标移入区域后按下想要的键。支持键盘/鼠标按键及组合键（如 Ctrl+F6、鼠标侧键）。快捷键仅在目标窗口焦点时响应。
 - **启动后自动隐藏到托盘**：勾选后下次启动直接进入后台。
 
-### 2. 按键序列列表
+## 2. 按键序列列表
 
 - 点击"添加序列"创建新行
 - 各行**独立并行执行**，互不影响
 - 支持拖拽排序
 - 选中后可在下方详情区编辑
 
-### 3. 序列详情
+## 3. 序列详情
 
 选中一行序列后：
 
 - **录制按键**：点击弹出录制窗口，鼠标在窗口区域内时录制所有按键（包括回车键），鼠标移出暂停，移回继续，关闭窗口结束录制
 - **删除/清空**：管理序列中的按键
-- **间隔**：设定该序列内按键之间的随机延迟区间
+- **间隔**：设定该序列内按键之间的随机延迟区间（最小值不能超过最大值，最大值不能低于最小值）
+
+**长按模式**：将间隔的最小值和最大值都设为 0，序列进入长按模式。启动后会按住第一个按键不放，直到按快捷键停止或窗口失焦时才松开。序列中有多个按键时只按住第一个。组合键（如 Shift+W）会同时按住所有键。序列列表中会显示"长按"标识。
 
 支持的输入：
 - 键盘：任意按键 + 组合键（Shift+A、Ctrl+E 等）
 - 鼠标：左键、右键、中键、侧键 1/2
 
-### 4. 开始/停止
+## 4. 开始/停止
 
 按下快捷键切换运行状态：
 
@@ -58,7 +37,7 @@ eval "$(conda shell.bash hook 2>/dev/null)" && conda activate CustomKeyEcho && p
 - 再次按下 → 全部停止
 - 序列执行完一轮后自动从头循环
 
-### 焦点检测
+## 焦点检测
 
 设置了目标窗口后：
 - 窗口在前台 → 正常发送按键
@@ -66,7 +45,7 @@ eval "$(conda shell.bash hook 2>/dev/null)" && conda activate CustomKeyEcho && p
 - 窗口恢复焦点 → 自动继续
 - 窗口关闭 → 自动停止所有序列，游戏重开后按快捷键即可重新启动
 
-### 系统托盘
+## 系统托盘
 
 - 点击关闭按钮 → 隐藏到系统托盘（程序继续运行）
 - 点击最小化按钮 → 最小化窗口
@@ -79,16 +58,16 @@ eval "$(conda shell.bash hook 2>/dev/null)" && conda activate CustomKeyEcho && p
 
 ## 常见问题
 
-### 按键在游戏中无效
+#### 按键在游戏中无效
 
 - 尝试以管理员权限运行程序
 - 部分游戏使用内核级反作弊，SendInput 可能被拦截
 
-### 修改间隔不生效
+#### 修改间隔不生效
 
 修改间隔后需要停止并重新启动回放才能生效。
 
-### 开机自动运行
+#### 开机自动运行
 
 1. 勾选"启动后自动隐藏到托盘"
 2. 将程序快捷方式添加到 `shell:startup`（开机启动文件夹）
